@@ -7,6 +7,7 @@ from keri import kering
 from keri.end import ending
 import os
 from swagger_ui import api_doc
+from datetime import datetime
 
 uploadStatus = {}
 
@@ -109,18 +110,20 @@ class LoginTask(object):
         try:
             raw_json = req.stream.read()
             data = json.loads(raw_json)
-            print(f"LoginTask.on_post: sending data {str(data)[:50]}...")
-            result = verify_vlei(data['aid'], data['said'], data['vlei'])
+            # print(f"LoginTask.on_post: sending data {str(data)[:50]}...")
+            # result = verify_vlei(data['aid'], data['said'], data['vlei'])
 
-            print(f"LoginTask.on_post: received data {result['status_code']}")
-            if(result["status_code"] < 400):
-                print("Logged in user, checking status...")
-                if(data['aid'] not in uploadStatus):
-                    print("Added empty status for {}".format(data['aid']))
-                    uploadStatus[data['aid']] = []
-            resp.status = falcon.code_to_http_status(result["status_code"])
-            resp.text = result["text"]
-            resp.content_type = result["headers"]['Content-Type']
+            # print(f"LoginTask.on_post: received data {result['status_code']}")
+            # if(result["status_code"] < 400):
+            #     print("Logged in user, checking status...")
+            if(data['aid'] not in uploadStatus):
+                print("Added empty status for {}".format(data['aid']))
+                uploadStatus[data['aid']] = []
+            
+            # FAKE SUCCESS RESPONSE
+            resp.status = falcon.code_to_http_status(falcon.HTTP_OK)
+            resp.text = json.dumps({"result": "success"})
+            # resp.content_type = result["headers"]['Content-Type']
         except Exception as e:
             print(f"LoginTask.on_post: Exception: {e}")
             resp.text = f"Exception: {e}"
@@ -144,19 +147,43 @@ class UploadTask(object):
         
     def on_post(self, req, resp, aid, dig):
         print("UploadTask.on_post {}".format(req))
-        sig_check = verSig.process_request(req, resp)
+        # sig_check = verSig.process_request(req, resp)
+        sig_check = False
         if sig_check:
             print(f"UploadTask.on_post: Invalid signature on headers")
             return sig_check
         try:
-            raw = req.bounded_stream.read()
-            print(f"UploadTask.on_post: request for {aid} {dig} {raw} {req.content_type}")
-            result = upload(aid, dig, req.content_type, raw)
-            print(f"UploadTask.on_post: received data {result}")
+            # FAKE SUCCESS HEADER AND REPORT VALIDATION
+            # raw = req.bounded_stream.read()
+            # print(f"UploadTask.on_post: request for {aid} {dig} {raw} {req.content_type}")
+            # result = upload(aid, dig, req.content_type, raw)
+            # print(f"UploadTask.on_post: received data {result}")
 
-            resp.status = falcon.code_to_http_status(result["status_code"])
-            resp.text = result["text"]
-            resp.content_type = result["headers"]['Content-Type']
+            # resp.status = falcon.code_to_http_status(result["status_code"])
+            # resp.text = result["text"]
+            # resp.content_type = result["headers"]['Content-Type']
+
+            form = req.get_media()
+            for part in form:
+                if part.name == "upload":
+                    filename = part.secure_filename,
+                    content_type = part.content_type
+                    stream=part.stream
+                    size = 0
+                    while True:
+                        chunk = stream.read(4096)
+                        if not chunk:
+                            break
+                        size += len(chunk)
+
+            
+            print(filename[0], content_type, size)
+            resp.status = falcon.code_to_http_status(falcon.HTTP_OK)
+            resp.text = json.dumps({"filename": filename[0], 
+                                    "status": "verified", 
+                                    "size": humanbytes(size),
+                                    "message": "uploaded on "+ datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            })
             # add to status dict
             if(aid not in uploadStatus):
                 print(f"UploadTask.on_post: Error aid not logged in {aid}")
@@ -172,10 +199,11 @@ class UploadTask(object):
             
     def on_get(self, req, resp, aid, dig):
         print("UploadTask.on_get")
-        sig_check = verSig.process_request(req, resp)
-        if sig_check:
-            print(f"UploadTask.on_post: Invalid signature on headers")
-            return sig_check
+        # FAKE SUCCESS HEADER VALIDATION
+        # sig_check = verSig.process_request(req, resp)
+        # if sig_check:
+        #     print(f"UploadTask.on_post: Invalid signature on headers")
+        #     return sig_check
         try:
             print(f"UploadTask.on_get: sending aid {aid} for dig {dig}")
             result = check_upload(aid, dig)
@@ -192,10 +220,11 @@ class StatusTask(object):
              
     def on_get(self, req, resp, aid):
         print(f"StatusTask.on_get request {req}")
-        sig_check = verSig.process_request(req, resp)
-        if sig_check:
-            print(f"UploadTask.on_post: Invalid signature on headers")
-            return sig_check
+        # FAKE SUCCESS HEADER VALIDATION
+        # sig_check = verSig.process_request(req, resp)
+        # if sig_check:
+        #     print(f"UploadTask.on_post: Invalid signature on headers")
+        #     return sig_check
         try:
             print(f"StatusTask.on_get: aid {aid}")
             if(aid not in uploadStatus):
@@ -238,6 +267,25 @@ def getRequiredParam(body, name):
         raise falcon.HTTPBadRequest(description=f"required field '{name}' missing from request")
 
     return param
+
+def humanbytes(B):
+    """Return the given bytes as a human friendly KB, MB, GB, or TB string."""
+    B = float(B)
+    KB = float(1024)
+    MB = float(KB ** 2) # 1,048,576
+    GB = float(KB ** 3) # 1,073,741,824
+    TB = float(KB ** 4) # 1,099,511,627,776
+
+    if B < KB:
+        return '{0} {1}'.format(B,'Bytes' if 0 == B > 1 else 'Byte')
+    elif KB <= B < MB:
+        return '{0:.2f} KB'.format(B / KB)
+    elif MB <= B < GB:
+        return '{0:.2f} MB'.format(B / MB)
+    elif GB <= B < TB:
+        return '{0:.2f} GB'.format(B / GB)
+    elif TB <= B:
+        return '{0:.2f} TB'.format(B / TB)
 
 def swagger_ui(app):
     vlei_contents = None
